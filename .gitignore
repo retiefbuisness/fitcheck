@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+mobile/android/
+mobile/ios/
+builds/
+*.apk
+*.aab
+*.jks
+*.keystore
+.env
+.env*.local
+.DS_Store
+.claude/
+supabase/.temp/
+supabase/.branches/
