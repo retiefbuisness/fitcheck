@@ -26,6 +26,7 @@ export default function SignUp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [sentTo, setSentTo] = useState<string>();
+  const [exists, setExists] = useState<'username' | 'email'>();
 
   async function checkUsername() {
     const u = username.trim().toLowerCase();
@@ -50,7 +51,11 @@ export default function SignUp() {
     if (!accepted) return setError('Please accept the Terms of Use and Privacy Policy.');
 
     setBusy(true);
-    if (!(await checkUsername())) return setBusy(false);
+    if (!(await checkUsername())) {
+      setBusy(false);
+      if (USERNAME_RE.test(username.trim().toLowerCase())) setExists('username');
+      return;
+    }
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
@@ -65,8 +70,47 @@ export default function SignUp() {
       },
     });
     setBusy(false);
-    if (error) return setError(friendlyError(error));
+    if (error) {
+      if (/already registered|already exists|duplicate key.*username|profiles_username_key/i.test(error.message)) {
+        return setExists(/username/i.test(error.message) ? 'username' : 'email');
+      }
+      return setError(friendlyError(error));
+    }
+    // With email confirmation on, Supabase answers an existing email with a user that has no identities.
+    if (data.user && data.user.identities?.length === 0) return setExists('email');
     if (!data.session) setSentTo(email.trim());
+  }
+
+  if (exists) {
+    return (
+      <div className="hero">
+        <Link to="/welcome" className="brand">
+          Fit<span>Check</span>
+        </Link>
+        <div className="stack">
+          <h1>This account already exists</h1>
+          <p className="muted">
+            {exists === 'username' ? (
+              <>
+                Someone already has the username <strong>@{username.trim().toLowerCase()}</strong>. If it's yours, sign in.
+                Otherwise go back and pick a different username.
+              </>
+            ) : (
+              <>
+                There's already a Fit Check account for <strong>{email.trim()}</strong>. Sign in instead, or go back and use a
+                different email.
+              </>
+            )}
+          </p>
+          <Link to="/sign-in" className="btn primary block">
+            Sign in
+          </Link>
+          <button type="button" className="btn ghost block" onClick={() => setExists(undefined)}>
+            Sign up with different details
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (sentTo) {
