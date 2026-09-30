@@ -194,3 +194,18 @@ textarea.input { resize: vertical; min-height: 72px; }
 .switch { display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; }
 .switch input { width: 20px; height: 20px; accent-color: var(--accent); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Dialogs (photo cropper) */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 20px; width: 100%; max-width: 360px; max-height: calc(100dvh - 32px); overflow: auto; }
+.crop-frame { position: relative; overflow: hidden; margin: 0 auto; border-radius: 16px; background: #111; touch-action: none; cursor: grab; user-select: none; }
+.crop-frame:active { cursor: grabbing; }
+.crop-frame img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; user-select: none; }
+.crop-mask { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); pointer-events: none; }
+.modal input[type='range'] { width: 100%; accent-color: var(--accent); }
+
+/* Closet photo: cleaned vs original toggle */
+.photo-toggle { display: flex; gap: 6px; justify-content: center; }
+.photo-toggle button { border: 1px solid var(--border); background: var(--card); color: inherit; border-radius: 999px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
+.photo-toggle button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.ai-note { font-size: 13px; }
