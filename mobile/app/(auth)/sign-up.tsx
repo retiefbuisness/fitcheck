@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
-import { Body, Button, Input, Screen } from '../../src/components/ui';
+import { Body, Button, Input, Screen, Title } from '../../src/components/ui';
 import { LINKS, MIN_AGE } from '../../src/config';
 import { friendlyError, supabase } from '../../src/lib/supabase';
 import { space, useTheme } from '../../src/theme';
@@ -33,6 +33,7 @@ export default function SignUp() {
   const [year, setYear] = useState('');
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exists, setExists] = useState<'username' | 'email'>();
 
   async function checkUsername(name = username) {
     const u = name.trim().toLowerCase();
@@ -59,6 +60,7 @@ export default function SignUp() {
     setBusy(true);
     if (!(await checkUsername())) {
       setBusy(false);
+      if (USERNAME_RE.test(username.trim().toLowerCase())) setExists('username');
       return;
     }
     const dob = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -76,12 +78,36 @@ export default function SignUp() {
       },
     });
     setBusy(false);
-    if (error) return Alert.alert("Couldn't create account", friendlyError(error));
+    if (error) {
+      if (/already registered|already exists|duplicate key.*username|profiles_username_key/i.test(error.message)) {
+        return setExists(/username/i.test(error.message) ? 'username' : 'email');
+      }
+      return Alert.alert("Couldn't create account", friendlyError(error));
+    }
+    // With email confirmation on, Supabase answers an existing email with a user that has no identities.
+    if (data.user && data.user.identities?.length === 0) return setExists('email');
     if (!data.session) {
       Alert.alert('Confirm your email', `We sent a link to ${email.trim()}. Tap it on this phone, then sign in.`, [
         { text: 'OK', onPress: () => router.replace('/sign-in') },
       ]);
     }
+  }
+
+  if (exists) {
+    return (
+      <Screen edges={['bottom']}>
+        <View style={{ gap: space.md, paddingTop: space.lg }}>
+          <Title>This account already exists</Title>
+          <Body muted>
+            {exists === 'username'
+              ? `Someone already has the username @${username.trim().toLowerCase()}. If it's yours, sign in. Otherwise go back and pick a different username.`
+              : `There's already a Fit Check account for ${email.trim()}. Sign in instead, or go back and use a different email.`}
+          </Body>
+          <Button title="Sign in" onPress={() => router.replace('/sign-in')} />
+          <Button title="Sign up with different details" variant="secondary" onPress={() => setExists(undefined)} />
+        </View>
+      </Screen>
+    );
   }
 
   const dobInput = { keyboardType: 'number-pad' as const, style: { textAlign: 'center' as const } };
