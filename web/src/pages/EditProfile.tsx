@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CropDialog } from '../components/CropDialog';
 import { Avatar, Spinner } from '../components/ui';
 import { useAuth } from '../lib/auth';
 import { compressImage, removeImage, uploadImage } from '../lib/images';
@@ -14,11 +15,12 @@ export default function EditProfile() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
+  const [cropping, setCropping] = useState<File | null>(null);
 
   if (!profile) return <Spinner />;
 
-  async function changePhoto(file: File | undefined) {
-    if (!file) return;
+  async function changePhoto(file: Blob) {
+    setCropping(null);
     setUploading(true);
     try {
       const img = await compressImage(file, 400);
@@ -55,8 +57,19 @@ export default function EditProfile() {
         <button type="button" className="btn ghost small" onClick={() => fileInput.current?.click()} disabled={uploading}>
           {uploading ? 'Uploading…' : 'Change photo'}
         </button>
-        <input ref={fileInput} type="file" accept="image/*" className="visually-hidden" onChange={(e) => changePhoto(e.target.files?.[0])} />
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          className="visually-hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) setCropping(file);
+          }}
+        />
       </div>
+      {cropping ? <CropDialog file={cropping} onCancel={() => setCropping(null)} onDone={changePhoto} /> : null}
       <label className="field">
         <span>Username</span>
         <input className="input" value={`@${profile.username}`} disabled />
