@@ -38,6 +38,7 @@
 <h2>How the AI features work</h2>
 <p>Outfit ideas and outfit ratings run <strong>on your phone</strong>, using Google's on-device Gemini Nano model (through Android's ML Kit GenAI APIs and AICore). The photos and text you give the AI are processed on your device. They are not sent to us or to an AI company for these features.</p>
 <p>Google may collect limited metrics about how the on-device AI features perform (for example, whether a request succeeded and how long it took), as described in Google's ML Kit terms. On phones without on-device AI, Fit Check uses built-in style rules instead, which also run on your phone.</p>
+<p><strong>Smart photos (website):</strong> if you turn on smart photos when adding clothes, your browser downloads free, open-source AI models once (a background-removal model and an image-recognition model). They run inside your browser: your clothing photos are processed on your device and are not sent to us or to the companies that host these model files. Only the photo you choose to save (the cleaned one or the original) is uploaded to your private closet.</p>
 <p>AI ratings are only about clothing and styling. They are not a judgement of your body or appearance, and they can be wrong.</p>
 
 <h2>How we use your information</h2>
@@ -57,6 +58,7 @@
 <p>We do not sell your personal information or share it for advertising. We use these service providers to run Fit Check:</p>
 <ul>
   <li><strong>Supabase</strong> hosts our database, sign-in and photo storage (servers in Ireland, EU).</li>
+  <li><strong>jsDelivr, IMG.LY and Hugging Face</strong> host the AI model files for smart photos. Like any website, they can see that a download happened, but they never receive your photos.</li>
   <li><strong>Google</strong> provides the on-device AI (ML Kit / Gemini Nano) and distributes the app through Google Play.</li>
 </ul>
 <p>We may disclose information if required by law, or to report child sexual abuse material to the relevant authorities (see our <a href="child-safety.html">Child Safety Standards</a>).</p>
