@@ -45,7 +45,7 @@ export default function AddItem() {
   const [smart, setSmart] = useState<SmartSetting>(getSmartSetting);
   const [step, setStep] = useState<'cleaning' | 'tagging' | null>(null);
   const [firstRun, setFirstRun] = useState(false);
-  const [alreadyWhite, setAlreadyWhite] = useState(false);
+  const [kept, setKept] = useState<'white' | 'whole' | null>(null);
   const [aiFilled, setAiFilled] = useState(false);
   const [cleanFailed, setCleanFailed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -84,7 +84,7 @@ export default function AddItem() {
 
   async function process(photo: Blob, useSmart: boolean) {
     const id = ++run.current;
-    setAlreadyWhite(false);
+    setKept(null);
     if (useSmart) {
       setFirstRun(!smartPhotosReady());
       setStep('cleaning');
@@ -94,7 +94,7 @@ export default function AddItem() {
         setPieces(scan.pieces);
         setPieceIdx(0);
         setWhich('clean');
-        setAlreadyWhite(scan.alreadyWhite);
+        setKept(scan.alreadyWhite ? 'white' : scan.keptWhole ? 'whole' : null);
         if (scan.guess) {
           applyGuess(scan.guess);
           setStep(null);
@@ -228,12 +228,14 @@ export default function AddItem() {
           </div>
         </div>
       ) : null}
-      {alreadyWhite && !step ? (
+      {kept && !step ? (
         <p className="muted small center" style={{ margin: 0 }}>
-          This photo already has a white background, so we kept it as it is.
+          {kept === 'white'
+            ? 'This photo already has a white background, so we kept it as it is.'
+            : "We couldn't cleanly separate the item from the background, so we kept your photo as it is."}
         </p>
       ) : null}
-      {clean && original && !alreadyWhite ? (
+      {clean && original && !kept ? (
         <div className="photo-toggle" role="group" aria-label="Which photo to use">
           <button type="button" aria-pressed={which === 'clean'} onClick={() => setWhich('clean')}>
             White background
