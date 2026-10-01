@@ -13,6 +13,8 @@ import {
   setSmartSetting,
   smartPhotosReady,
   SMART_DOWNLOAD_MB,
+  type CleanPiece,
+  type ColorShare,
   type SmartGuess,
   type SmartSetting,
   warmUpSmartPhotos,
@@ -37,7 +39,8 @@ export default function AddItem() {
   const userId = useUserId();
   const navigate = useNavigate();
   const [original, setOriginal] = useState<Blob | null>(null);
-  const [clean, setClean] = useState<Blob | null>(null);
+  const [pieces, setPieces] = useState<CleanPiece[]>([]);
+  const [pieceIdx, setPieceIdx] = useState(0);
   const [which, setWhich] = useState<Which>('clean');
   const [draft, setDraft] = useState<ItemDraft>(EMPTY_DRAFT);
   const [smart, setSmart] = useState<SmartSetting>(getSmartSetting);
@@ -50,6 +53,7 @@ export default function AddItem() {
   const touched = useRef(new Set<keyof ItemDraft>());
   const run = useRef(0);
 
+  const clean = pieces[pieceIdx]?.clean ?? null;
   const shown = which === 'clean' && clean ? clean : original;
   const preview = usePreview(shown);
   const smartOn = smart !== 'off'; // on unless the user turned it off
@@ -80,23 +84,27 @@ export default function AddItem() {
 
   async function process(photo: Blob, useSmart: boolean) {
     const id = ++run.current;
-    let forAi = photo;
-    let colors: string[] = [];
+    let first: CleanPiece | undefined;
     setFirstRun(useSmart && !smartPhotosReady());
     if (useSmart) {
       setStep('cleaning');
       try {
-        const result = await cleanBackground(photo);
+        const found = await cleanBackground(photo);
         if (id !== run.current) return;
-        setClean(result.clean);
+        setPieces(found);
+        setPieceIdx(0);
         setWhich('clean');
-        forAi = result.clean;
-        colors = result.colors;
+        first = found[0];
       } catch {
         if (id !== run.current) return;
         setCleanFailed(true);
       }
     }
+    await tag(id, first?.clean ?? photo, first?.colors ?? [], useSmart);
+  }
+
+  // Works out the type, colour and pattern and fills them in.
+  async function tag(id: number, forAi: Blob, colors: ColorShare[], useSmart: boolean) {
     setStep('tagging');
     try {
       let guess: SmartGuess;
@@ -114,9 +122,19 @@ export default function AddItem() {
     }
   }
 
+  // The photo had more than one piece of clothing: use a different one.
+  function choosePiece(i: number) {
+    const piece = pieces[i];
+    if (!piece || i === pieceIdx) return;
+    setPieceIdx(i);
+    setWhich('clean');
+    tag(++run.current, piece.clean, piece.colors, true);
+  }
+
   async function choose(file: File) {
     setError(undefined);
-    setClean(null);
+    setPieces([]);
+    setPieceIdx(0);
     setCleanFailed(false);
     setAiFilled(false);
     touched.current.clear();
@@ -184,10 +202,25 @@ export default function AddItem() {
         <img src={preview} alt="Clothing item" className="thumb" style={{ borderRadius: 16, objectFit: 'contain', background: '#fff' }} />
       ) : (
         <div className="card center muted" style={{ padding: 32 }}>
-          Lay the item flat or hang it up. {smartOn ? "We'll put it on a white background and fill in the details for you." : 'A plain background works best.'}
+          Take a photo of the item: laid flat, on a hanger or being worn.{' '}
+          {smartOn ? "We'll cut it out onto a white background and fill in the details for you." : 'A plain background works best.'}
         </div>
       )}
 
+      {pieces.length > 1 ? (
+        <div className="stack" style={{ gap: 6 }}>
+          <p className="muted small center" style={{ margin: 0 }}>
+            We found more than one item. Which one are you adding?
+          </p>
+          <div className="photo-toggle" role="group" aria-label="Which item" style={{ flexWrap: 'wrap' }}>
+            {pieces.map((p, i) => (
+              <button key={i} type="button" aria-pressed={i === pieceIdx} onClick={() => choosePiece(i)}>
+                {p.label || `Item ${i + 1}`}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {clean && original ? (
         <div className="photo-toggle" role="group" aria-label="Which photo to use">
           <button type="button" aria-pressed={which === 'clean'} onClick={() => setWhich('clean')}>
@@ -208,7 +241,7 @@ export default function AddItem() {
 
       {step ? (
         <div className="row muted">
-          <Spinner inline /> {step === 'cleaning' ? 'Cleaning up the background…' : 'Working out what it is…'}
+          <Spinner inline /> {step === 'cleaning' ? 'Finding the clothing and cutting it out…' : 'Working out what it is…'}
         </div>
       ) : null}
       {step && firstRun ? (
