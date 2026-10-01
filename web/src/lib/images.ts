@@ -85,28 +85,49 @@ export function useSignedUrl(bucket: Bucket, path: string | null | undefined) {
   return path ? url : null;
 }
 
-// Two most common colours in the centre of a photo, as #rrggbb.
+// Two most common colours of the item in a photo, as #rrggbb. Looks at the centre
+// and skips the background colour (the most common colour around the edges).
 export async function dominantColors(file: Blob): Promise<string[]> {
   try {
     const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const W = 60;
+    const H = 80;
     const canvas = document.createElement('canvas');
-    canvas.width = 60;
-    canvas.height = 80;
+    canvas.width = W;
+    canvas.height = H;
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-    ctx.drawImage(bitmap, 0, 0, 60, 80);
+    ctx.drawImage(bitmap, 0, 0, W, H);
     bitmap.close();
-    const { data } = ctx.getImageData(12, 16, 36, 48);
+    const { data } = ctx.getImageData(0, 0, W, H);
+    const bucketOf = (i: number) => ((data[i] >> 5) << 6) | ((data[i + 1] >> 5) << 3) | (data[i + 2] >> 5);
+
+    // Background: the most common colour along the outer 3 pixels.
+    const edge = new Map<number, number>();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (x >= 3 && x < W - 3 && y >= 3 && y < H - 3) continue;
+        const k = bucketOf((y * W + x) * 4);
+        edge.set(k, (edge.get(k) ?? 0) + 1);
+      }
+    }
+    const [bg, bgCount] = [...edge.entries()].sort((a, b) => b[1] - a[1])[0] ?? [-1, 0];
+    const edgeTotal = 2 * 3 * (W + H) - 36;
+    const skip = bgCount > edgeTotal * 0.35 ? bg : -1; // only when the edges are fairly uniform
+
     const buckets = new Map<number, [number, number, number, number]>();
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 128) continue;
-      const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
-      const key = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
-      const acc = buckets.get(key) ?? [0, 0, 0, 0];
-      acc[0]++;
-      acc[1] += r;
-      acc[2] += g;
-      acc[3] += b;
-      buckets.set(key, acc);
+    for (let y = 12; y < H - 12; y++) {
+      for (let x = 9; x < W - 9; x++) {
+        const i = (y * W + x) * 4;
+        if (data[i + 3] < 128) continue;
+        const key = bucketOf(i);
+        if (key === skip) continue;
+        const acc = buckets.get(key) ?? [0, 0, 0, 0];
+        acc[0]++;
+        acc[1] += data[i];
+        acc[2] += data[i + 1];
+        acc[3] += data[i + 2];
+        buckets.set(key, acc);
+      }
     }
     const hex = (n: number) => Math.round(n).toString(16).padStart(2, '0');
     return [...buckets.values()]
