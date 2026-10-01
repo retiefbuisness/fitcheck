@@ -1,8 +1,8 @@
 // "Smart photos" for closet items, all on the user's own device:
 //  1. cut the clothing item out of the photo and put it on a clean white background
 //  2. recognise what it is (type, colour, pattern) so the form fills itself in
-// The AI models are downloaded once (about 90 MB, then cached by the browser),
-// so the user opts in first. Photos never leave the device for this.
+// The AI models are downloaded once (about 100 MB, then cached by the browser).
+// It's on by default and can be turned off. Photos never leave the device for this.
 import { nearestColorName } from '../shared/colors';
 import type { Category } from '../shared/types';
 import { LABEL_EMBEDDINGS } from './clothingEmbeddings';
@@ -10,10 +10,10 @@ import { COLOR_LABELS, GARMENTS, LABEL_TEXTS, PATTERN_LABELS } from './clothingL
 
 const BG_REMOVAL_URL = 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm';
 const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm';
-const CLIP_MODEL = 'Xenova/clip-vit-base-patch32';
-const SETTING_KEY = 'fitcheck.smartPhotos';
+const FASHION_MODEL = 'Marqo/marqo-fashionSigLIP'; // fashion-trained, runs in the browser
+const SETTING_KEY = 'fitcheck.smartPhotos.v2'; // v2: on by default (v1 was opt-in)
 
-export const SMART_DOWNLOAD_MB = 90;
+export const SMART_DOWNLOAD_MB = 100;
 
 export type SmartSetting = 'on' | 'off' | null;
 
@@ -38,7 +38,9 @@ export function setSmartSetting(v: 'on' | 'off') {
 
 type BgModule = {
   removeBackground: (image: Blob, config?: object) => Promise<Blob>;
+  preload?: (config?: object) => Promise<void>;
 };
+const BG_CONFIG = { model: 'isnet_quint8', output: { format: 'image/png' } };
 let bgModule: Promise<BgModule> | null = null;
 
 function loadBgRemoval() {
@@ -55,7 +57,8 @@ export interface CleanPhoto {
 // Cuts the item out and centres it on a white 3:4 canvas with a little padding.
 export async function cleanBackground(photo: Blob): Promise<CleanPhoto> {
   const { removeBackground } = await loadBgRemoval();
-  const cutout = await removeBackground(photo, { model: 'isnet_quint8', output: { format: 'image/png' } });
+  const cutout = await removeBackground(photo, BG_CONFIG);
+  bgReady = true;
   const bitmap = await createImageBitmap(cutout);
   try {
     // Find the item's bounding box from the transparency mask.
@@ -108,7 +111,7 @@ export async function cleanBackground(photo: Blob): Promise<CleanPhoto> {
   }
 }
 
-// Two most common colours among the item's own (non-transparent) pixels.
+// Most common colour (and a second, if there's a lot of it) among the item's own pixels.
 function itemColors(data: Uint8ClampedArray, width: number, height: number): string[] {
   const buckets = new Map<number, [number, number, number, number]>();
   const step = Math.max(1, Math.floor(Math.sqrt((width * height) / 20000)));
@@ -127,38 +130,67 @@ function itemColors(data: Uint8ClampedArray, width: number, height: number): str
     }
   }
   const hex = (n: number) => Math.round(n).toString(16).padStart(2, '0');
-  return [...buckets.values()]
-    .sort((a, b) => b[0] - a[0])
-    .slice(0, 2)
+  const top = [...buckets.values()].sort((a, b) => b[0] - a[0]);
+  // A second colour only counts if it covers a fair part of the item (not just shadows or a logo).
+  return top
+    .filter((c, i) => i === 0 || (i === 1 && c[0] >= top[0][0] * 0.4))
     .map(([n, r, g, b]) => `#${hex(r / n)}${hex(g / n)}${hex(b / n)}`);
 }
 
 // ---------- 2. Recognising the item ----------
 
 type Tensor = { data: Float32Array };
+type Model = (inputs: object) => Promise<{ image_embeds: Tensor }>;
 type TfModule = {
   env: { allowLocalModels: boolean };
   AutoProcessor: { from_pretrained: (id: string) => Promise<(img: unknown) => Promise<object>> };
-  CLIPVisionModelWithProjection: {
-    from_pretrained: (id: string, o: object) => Promise<(inputs: object) => Promise<{ image_embeds: Tensor }>>;
-  };
+  SiglipVisionModel: { from_pretrained: (id: string, o: object) => Promise<Model> };
   RawImage: { fromBlob: (b: Blob) => Promise<unknown> };
 };
 
-let clip: Promise<{ tf: TfModule; processor: (img: unknown) => Promise<object>; model: (i: object) => Promise<{ image_embeds: Tensor }> }> | null = null;
+let vision: Promise<{ tf: TfModule; processor: (img: unknown) => Promise<object>; model: Model }> | null = null;
 
-function loadClip() {
-  clip ??= (async () => {
+let cpuOnly = false;
+
+async function loadModel(tf: TfModule) {
+  // The graphics chip is much faster where the browser supports it; otherwise the CPU.
+  if (!cpuOnly && (navigator as { gpu?: unknown }).gpu) {
+    try {
+      return await tf.SiglipVisionModel.from_pretrained(FASHION_MODEL, { dtype: 'q4f16', device: 'webgpu' });
+    } catch {
+      // Fall back to the CPU below.
+    }
+  }
+  return tf.SiglipVisionModel.from_pretrained(FASHION_MODEL, { dtype: 'q4', device: 'wasm' });
+}
+
+function loadVision() {
+  vision ??= (async () => {
     const tf = (await import(/* @vite-ignore */ TRANSFORMERS_URL)) as TfModule;
     tf.env.allowLocalModels = false;
-    const [processor, model] = await Promise.all([
-      tf.AutoProcessor.from_pretrained(CLIP_MODEL),
-      tf.CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL, { dtype: 'q4', device: 'wasm' }),
-    ]);
+    const [processor, model] = await Promise.all([tf.AutoProcessor.from_pretrained(FASHION_MODEL), loadModel(tf)]);
     return { tf, processor, model };
   })();
-  clip.catch(() => (clip = null));
-  return clip;
+  vision.then(() => (visionReady = true)).catch(() => (vision = null));
+  return vision;
+}
+
+let visionReady = false;
+let bgReady = false;
+
+// True once the AI models are downloaded and loaded in this session.
+export function smartPhotosReady() {
+  return visionReady && bgReady;
+}
+
+// Starts the one-off downloads early (e.g. when the Add screen opens) so the
+// photo is ready to scan by the time the user has picked one.
+export function warmUpSmartPhotos() {
+  loadVision().catch(() => {});
+  loadBgRemoval()
+    .then((m) => m.preload?.(BG_CONFIG))
+    .then(() => (bgReady = true))
+    .catch(() => {});
 }
 
 // Unpacks the int8 label embeddings into normalised Float32 vectors.
@@ -184,7 +216,7 @@ function labelVectors(): Float32Array[] {
   return out;
 }
 
-// Softmax over the similarity scores (CLIP's usual temperature of 100).
+// Softmax over the similarity scores (temperature 100, as in CLIP/SigLIP examples).
 function probabilities(image: Float32Array, vectors: Float32Array[]): number[] {
   const scores = vectors.map((v) => v.reduce((s, x, j) => s + x * image[j], 0) * 100);
   const max = Math.max(...scores);
@@ -207,14 +239,27 @@ export interface SmartGuess {
   warmth?: number;
 }
 
-export async function recogniseClothing(photo: Blob, colors: string[] = []): Promise<SmartGuess> {
-  const { tf, processor, model } = await loadClip();
+async function imageEmbedding(photo: Blob): Promise<Float32Array> {
+  const { tf, processor, model } = await loadVision();
   const image = await tf.RawImage.fromBlob(photo);
-  const inputs = await processor(image);
-  const { image_embeds } = await model(inputs);
+  const { image_embeds } = await model(await processor(image));
   const emb = Float32Array.from(image_embeds.data);
   const norm = Math.sqrt(emb.reduce((s, x) => s + x * x, 0)) || 1;
   for (let i = 0; i < emb.length; i++) emb[i] /= norm;
+  return emb;
+}
+
+export async function recogniseClothing(photo: Blob, colors: string[] = []): Promise<SmartGuess> {
+  let emb: Float32Array;
+  try {
+    emb = await imageEmbedding(photo);
+  } catch (e) {
+    if (cpuOnly) throw e;
+    // Some graphics chips load the model but can't run it: try again on the CPU.
+    cpuOnly = true;
+    vision = null;
+    emb = await imageEmbedding(photo);
+  }
 
   const vectors = labelVectors();
   const g = GARMENTS.length;
@@ -225,44 +270,29 @@ export async function recogniseClothing(photo: Blob, colors: string[] = []): Pro
 
   const guess: SmartGuess = {};
 
-  // Decide the category first by adding up all its garment types (more reliable
-  // than a single label), then pick the most likely garment within it.
+  // Always make a best guess (the user can change it). The category comes from
+  // adding up all its garment types, which is more reliable than one label;
+  // then the most likely garment within that category gives the name.
   const byCategory = new Map<Category, number>();
   GARMENTS.forEach((it, i) => byCategory.set(it.category, (byCategory.get(it.category) ?? 0) + garmentP[i]));
-  const [category, categoryP] = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0];
-  let item: (typeof GARMENTS)[number] | undefined;
-  if (categoryP >= 0.3) {
-    guess.category = category;
-    const idx = GARMENTS.map((it, i) => (it.category === category ? garmentP[i] : -1));
-    const best = argmax(idx);
-    if (garmentP[best] >= 0.1) {
-      item = GARMENTS[best];
-      guess.formality = item.formality;
-      guess.warmth = item.warmth;
-    }
-  }
+  const category = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const item = GARMENTS[argmax(GARMENTS.map((it, i) => (it.category === category ? garmentP[i] : -1)))];
+  guess.category = category;
+  guess.formality = item.formality;
+  guess.warmth = item.warmth;
 
-  // Main colour: the item's most common pixel colour (after the background is gone).
-  // The AI's colour guess is used when we have no pixels, or as the second colour.
-  const clipColorIdx = argmax(colorP);
-  const clipColor = colorP[clipColorIdx] >= 0.25 ? COLOR_LABELS[clipColorIdx].color : undefined;
-  const mainColor = colors[0] ? nearestColorName(colors[0]) : clipColor;
-  if (mainColor) guess.color = mainColor;
-  const second =
-    clipColor && clipColor !== mainColor && colorP[clipColorIdx] >= 0.3
-      ? clipColor
-      : colors[1] && nearestColorName(colors[1]) !== mainColor
-        ? nearestColorName(colors[1])
-        : undefined;
-  if (second) guess.secondary_color = second;
+  // Main colour: the item's most common pixel colour (once the background is gone),
+  // otherwise the AI's colour guess. Second colour only from the pixels.
+  const mainColor = colors[0] ? nearestColorName(colors[0]) : COLOR_LABELS[argmax(colorP)].color;
+  guess.color = mainColor;
+  const second = colors[1] ? nearestColorName(colors[1]) : undefined;
+  if (second && second !== mainColor) guess.secondary_color = second;
 
   const patternIdx = argmax(patternP);
-  if (patternP[patternIdx] >= 0.4) guess.pattern = PATTERN_LABELS[patternIdx].pattern;
+  guess.pattern = patternP[patternIdx] >= 0.4 ? PATTERN_LABELS[patternIdx].pattern : 'solid';
 
-  if (item) {
-    const patternWord = guess.pattern === 'striped' || guess.pattern === 'checked' || guess.pattern === 'floral' ? `${guess.pattern} ` : '';
-    const name = `${mainColor ? `${mainColor} ` : ''}${patternWord}${item.name.toLowerCase()}`;
-    guess.name = name.charAt(0).toUpperCase() + name.slice(1);
-  }
+  const patternWord = ['striped', 'checked', 'floral'].includes(guess.pattern) ? `${guess.pattern} ` : '';
+  const name = `${mainColor} ${patternWord}${item.name.toLowerCase()}`;
+  guess.name = name.charAt(0).toUpperCase() + name.slice(1);
   return guess;
 }
