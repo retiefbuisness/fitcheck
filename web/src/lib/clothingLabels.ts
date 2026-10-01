@@ -29,6 +29,7 @@ export const GARMENTS: GarmentLabel[] = [
   { prompt: 'a pair of chino trousers', category: 'bottom', name: 'Chinos', formality: 3, warmth: 3 },
   { prompt: 'a pair of formal suit trousers', category: 'bottom', name: 'Trousers', formality: 4, warmth: 3 },
   { prompt: 'a pair of sweatpants', category: 'bottom', name: 'Sweatpants', formality: 1, warmth: 3 },
+  { prompt: 'a pair of track pants', category: 'bottom', name: 'Track pants', formality: 1, warmth: 2 },
   { prompt: 'a pair of cargo pants', category: 'bottom', name: 'Cargo pants', formality: 1, warmth: 3 },
   { prompt: 'a pair of shorts', category: 'bottom', name: 'Shorts', formality: 1, warmth: 1 },
   { prompt: 'a skirt', category: 'bottom', name: 'Skirt', formality: 2, warmth: 1 },
