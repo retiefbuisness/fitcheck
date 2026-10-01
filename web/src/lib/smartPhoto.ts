@@ -385,6 +385,7 @@ export interface ScanResult {
   pieces: CleanPiece[]; // biggest first; the first is shown and filled in
   guess: SmartGuess | null; // for the first piece
   alreadyWhite: boolean; // the photo already had a white background
+  keptWhole: boolean; // couldn't cleanly separate the item, so the photo was kept as it is
 }
 
 // Turns what the AI recognised plus the item's colours into the form's details.
@@ -435,7 +436,7 @@ export async function scanPhoto(photo: Blob): Promise<ScanResult> {
     if (kept) {
       const piece = { label: '', ...kept };
       const guess = await recogniseClothing(piece).catch(() => null);
-      return { pieces: [piece], guess, alreadyWhite: true };
+      return { pieces: [piece], guess, alreadyWhite: true, keptWhole: false };
     }
   }
 
@@ -463,6 +464,7 @@ export async function scanPhoto(photo: Blob): Promise<ScanResult> {
   const fgArea = fg ? fg.reduce((s, a) => s + (a > 40 ? 1 : 0), 0) : 0;
   const pieces: CleanPiece[] = [];
   let firstIsAiPiece = false;
+  let keepWhole = false;
   for (const piece of parts?.pieces.slice(0, 4) ?? []) {
     const { w, h, person, owner } = parts!;
     // Worn: follow the clothing closely so skin is cut away. Not worn: allow a
@@ -475,16 +477,28 @@ export async function scanPhoto(photo: Blob): Promise<ScanResult> {
     const holes = enclosed((i) => grown[i] === 1, w, h);
     for (let i = 0; i < holes.length; i++) if (holes[i] && (!person || owner[i] === -1)) grown[i] = 1;
     const keep = upscale(grown, w, h, W, H);
-    const keepArea = keep.reduce((n, a) => n + (a > 40 ? 1 : 0), 0);
-    // The clothing fills the photo (a close-up): there's no background to remove.
-    const fillsPhoto = !person && keepArea > W * H * 0.85;
-    // The background remover missed a big part of the clothing (e.g. it took grey
-    // fabric for background): follow the clothing finder's outline instead.
-    const fgMissed = !person && fg !== null && fgArea < keepArea * 0.7;
+    if (!person && fg && pieces.length === 0) {
+      // Nobody is wearing it, so both AIs should agree on where the item is. If they
+      // don't (e.g. a close-up where the fabric fills the photo, or grey fabric taken
+      // for background), keep the whole photo rather than risk cutting into the item.
+      const seg = upscale(piece.mask, w, h, W, H);
+      let both = 0;
+      let either = 0;
+      for (let i = 0; i < seg.length; i++) {
+        const a = seg[i] > 127;
+        const b = fg[i] > 40;
+        if (a && b) both++;
+        if (a || b) either++;
+      }
+      if (either === 0 || both / either < 0.55) {
+        keepWhole = true;
+        break;
+      }
+    }
     const alpha = new Uint8ClampedArray(W * H);
     let area = 0;
     for (let i = 0; i < alpha.length; i++) {
-      alpha[i] = fillsPhoto ? 255 : fg && !fgMissed ? Math.min(fg[i], keep[i]) : keep[i];
+      alpha[i] = fg ? Math.min(fg[i], keep[i]) : keep[i];
       if (alpha[i] > 40) area++;
     }
     // On its own (flat or on a hanger), the piece should be most of the foreground.
@@ -496,7 +510,10 @@ export async function scanPhoto(photo: Blob): Promise<ScanResult> {
       pieces.push({ label: piece.label, ...result });
     }
   }
-  if (pieces.length === 0 && fg) {
+  if (keepWhole) {
+    const result = await compose(pixels, new Uint8ClampedArray(W * H).fill(255), W, H);
+    if (result) pieces.push({ label: '', ...result });
+  } else if (pieces.length === 0 && fg) {
     const result = await compose(pixels, fg, W, H);
     if (result) pieces.push({ label: '', ...result });
   }
@@ -506,7 +523,7 @@ export async function scanPhoto(photo: Blob): Promise<ScanResult> {
     firstIsAiPiece && classification
       ? finishGuess(classification, pieces[0].colors)
       : await recogniseClothing(pieces[0]).catch(() => null);
-  return { pieces, guess, alreadyWhite: false };
+  return { pieces, guess, alreadyWhite: false, keptWhole: keepWhole };
 }
 
 // Recognises one cut-out piece (used when the user picks a different piece).
