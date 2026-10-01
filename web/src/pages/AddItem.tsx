@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EMPTY_DRAFT, ItemForm, type ItemDraft } from '../components/ItemForm';
 import { PhotoButtons, Spinner } from '../components/ui';
-import { describeClothing, getAiStatus } from '../lib/ai';
+import { describeClothing } from '../lib/ai';
 import { useUserId } from '../lib/auth';
 import { compressImage, uploadImage } from '../lib/images';
 import {
@@ -11,9 +11,11 @@ import {
   getSmartSetting,
   recogniseClothing,
   setSmartSetting,
+  smartPhotosReady,
   SMART_DOWNLOAD_MB,
   type SmartGuess,
   type SmartSetting,
+  warmUpSmartPhotos,
 } from '../lib/smartPhoto';
 import { friendlyError, supabase } from '../lib/supabase';
 import { colorByName } from '../shared/colors';
@@ -40,6 +42,7 @@ export default function AddItem() {
   const [draft, setDraft] = useState<ItemDraft>(EMPTY_DRAFT);
   const [smart, setSmart] = useState<SmartSetting>(getSmartSetting);
   const [step, setStep] = useState<'cleaning' | 'tagging' | null>(null);
+  const [firstRun, setFirstRun] = useState(false);
   const [aiFilled, setAiFilled] = useState(false);
   const [cleanFailed, setCleanFailed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -49,6 +52,12 @@ export default function AddItem() {
 
   const shown = which === 'clean' && clean ? clean : original;
   const preview = usePreview(shown);
+  const smartOn = smart !== 'off'; // on unless the user turned it off
+
+  // Start the one-off AI download as soon as the screen opens.
+  useEffect(() => {
+    if (smartOn) warmUpSmartPhotos();
+  }, [smartOn]);
 
   // Only fill in fields the user hasn't changed themselves.
   function applyGuess(guess: SmartGuess) {
@@ -73,6 +82,7 @@ export default function AddItem() {
     const id = ++run.current;
     let forAi = photo;
     let colors: string[] = [];
+    setFirstRun(useSmart && !smartPhotosReady());
     if (useSmart) {
       setStep('cleaning');
       try {
@@ -89,11 +99,13 @@ export default function AddItem() {
     }
     setStep('tagging');
     try {
-      // Chrome's built-in AI is best when it's there; otherwise use the downloaded model.
-      const guess =
-        (await getAiStatus()) === 'available' || !useSmart
-          ? await describeClothing(forAi)
-          : await recogniseClothing(forAi, colors);
+      let guess: SmartGuess;
+      try {
+        guess = useSmart ? await recogniseClothing(forAi, colors) : await describeClothing(forAi);
+      } catch {
+        // The photo AI couldn't run (e.g. no connection the first time): at least guess the colour.
+        guess = await describeClothing(forAi);
+      }
       if (id === run.current) applyGuess(guess);
     } catch {
       // The user can fill in the details themselves.
@@ -112,7 +124,7 @@ export default function AddItem() {
       const small = await compressImage(file, 900);
       setOriginal(small);
       setWhich('clean');
-      await process(small, smart === 'on');
+      await process(small, smartOn);
     } catch (e) {
       setError(friendlyError(e));
       setStep(null);
@@ -168,31 +180,11 @@ export default function AddItem() {
     <>
       <h1>Add to closet</h1>
 
-      {smart === null ? (
-        <div className="card">
-          <strong className="row">
-            <Sparkles size={18} /> Smart photos
-          </strong>
-          <p className="muted small" style={{ margin: 0 }}>
-            Puts each item on a clean white background and fills in the type, colour and pattern for you. It all happens
-            on your device. The first time needs a one-off download of about {SMART_DOWNLOAD_MB} MB, so Wi-Fi is best.
-          </p>
-          <div className="row">
-            <button type="button" className="btn primary small" onClick={turnOnSmart}>
-              Turn on
-            </button>
-            <button type="button" className="btn ghost small" onClick={turnOffSmart}>
-              Not now
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {preview ? (
         <img src={preview} alt="Clothing item" className="thumb" style={{ borderRadius: 16, objectFit: 'contain', background: '#fff' }} />
       ) : (
         <div className="card center muted" style={{ padding: 32 }}>
-          Lay the item flat or hang it up. {smart === 'on' ? "We'll clean up the background for you." : 'A plain background works best.'}
+          Lay the item flat or hang it up. {smartOn ? "We'll put it on a white background and fill in the details for you." : 'A plain background works best.'}
         </div>
       )}
 
@@ -216,8 +208,13 @@ export default function AddItem() {
 
       {step ? (
         <div className="row muted">
-          <Spinner inline /> {step === 'cleaning' ? 'Cleaning up the background…' : 'Scanning your photo and filling in the details…'}
+          <Spinner inline /> {step === 'cleaning' ? 'Cleaning up the background…' : 'Working out what it is…'}
         </div>
+      ) : null}
+      {step && firstRun ? (
+        <p className="muted small" style={{ margin: 0 }}>
+          First time only: downloading the photo AI (about {SMART_DOWNLOAD_MB} MB). After this it's much quicker.
+        </p>
       ) : null}
       {aiFilled && !step ? (
         <p className="muted ai-note" style={{ margin: 0 }}>
@@ -231,15 +228,15 @@ export default function AddItem() {
       <button type="button" className="btn primary block" onClick={save} disabled={saving || step === 'cleaning'}>
         {saving ? 'Saving…' : 'Add to closet'}
       </button>
-      {smart === 'on' ? (
+      {smartOn ? (
         <button type="button" className="btn ghost small" onClick={turnOffSmart} style={{ alignSelf: 'center' }}>
           Turn off smart photos
         </button>
-      ) : smart === 'off' ? (
+      ) : (
         <button type="button" className="btn ghost small" onClick={turnOnSmart} style={{ alignSelf: 'center' }}>
           Turn on smart photos
         </button>
-      ) : null}
+      )}
     </>
   );
 }
