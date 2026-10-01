@@ -1,4 +1,4 @@
-// Labels the photo AI chooses between. Their CLIP text embeddings are
+// Labels the photo AI chooses between. Their text embeddings (Marqo-FashionSigLIP) are
 // pre-computed (see LABEL_EMBEDDINGS in clothingEmbeddings.ts) so the phone only
 // has to download the image half of the model. If you change, add or reorder
 // labels here, the embeddings must be generated again in the same order.
@@ -25,6 +25,7 @@ export const GARMENTS: GarmentLabel[] = [
   { prompt: 'a knitted sweater', category: 'top', name: 'Sweater', formality: 2, warmth: 4 },
   { prompt: 'a cardigan', category: 'top', name: 'Cardigan', formality: 2, warmth: 3 },
   { prompt: 'a pair of jeans', category: 'bottom', name: 'Jeans', formality: 2, warmth: 3 },
+  { prompt: 'a pair of baggy wide-leg jeans', category: 'bottom', name: 'Baggy jeans', formality: 1, warmth: 3 },
   { prompt: 'a pair of chino trousers', category: 'bottom', name: 'Chinos', formality: 3, warmth: 3 },
   { prompt: 'a pair of formal suit trousers', category: 'bottom', name: 'Trousers', formality: 4, warmth: 3 },
   { prompt: 'a pair of sweatpants', category: 'bottom', name: 'Sweatpants', formality: 1, warmth: 3 },
@@ -45,7 +46,8 @@ export const GARMENTS: GarmentLabel[] = [
   { prompt: 'a pair of high heels', category: 'shoes', name: 'Heels', formality: 4, warmth: 1 },
   { prompt: 'a pair of leather dress shoes', category: 'shoes', name: 'Dress shoes', formality: 4, warmth: 2 },
   { prompt: 'a pair of sandals', category: 'shoes', name: 'Sandals', formality: 1, warmth: 1 },
-  { prompt: 'a pair of flip-flops or slides', category: 'shoes', name: 'Slides', formality: 1, warmth: 1 },
+  { prompt: 'a pair of flip-flops', category: 'shoes', name: 'Slides', formality: 1, warmth: 1 },
+  { prompt: 'a pair of flat shoes', category: 'shoes', name: 'Flats', formality: 2, warmth: 1 },
   { prompt: 'a baseball cap', category: 'accessory', name: 'Cap', formality: 1, warmth: 1 },
   { prompt: 'a beanie hat', category: 'accessory', name: 'Beanie', formality: 1, warmth: 4 },
   { prompt: 'a scarf', category: 'accessory', name: 'Scarf', formality: 2, warmth: 4 },
@@ -99,7 +101,7 @@ export const COLOR_LABELS: { prompt: string; color: string }[] = [
 
 // The exact sentences given to the text model, in the order the embeddings are stored.
 export const LABEL_TEXTS: string[] = [
-  ...GARMENTS.map((g) => `a photo of ${g.prompt}.`),
-  ...PATTERN_LABELS.map((p) => `a photo of ${p.prompt}.`),
-  ...COLOR_LABELS.map((c) => `a photo of a ${c.prompt} piece of clothing.`),
+  ...GARMENTS.map((g) => g.prompt),
+  ...PATTERN_LABELS.map((p) => p.prompt),
+  ...COLOR_LABELS.map((c) => `a ${c.prompt} piece of clothing`),
 ];
