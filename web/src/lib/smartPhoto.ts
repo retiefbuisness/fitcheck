@@ -475,10 +475,16 @@ export async function scanPhoto(photo: Blob): Promise<ScanResult> {
     const holes = enclosed((i) => grown[i] === 1, w, h);
     for (let i = 0; i < holes.length; i++) if (holes[i] && (!person || owner[i] === -1)) grown[i] = 1;
     const keep = upscale(grown, w, h, W, H);
+    const keepArea = keep.reduce((n, a) => n + (a > 40 ? 1 : 0), 0);
+    // The clothing fills the photo (a close-up): there's no background to remove.
+    const fillsPhoto = !person && keepArea > W * H * 0.85;
+    // The background remover missed a big part of the clothing (e.g. it took grey
+    // fabric for background): follow the clothing finder's outline instead.
+    const fgMissed = !person && fg !== null && fgArea < keepArea * 0.7;
     const alpha = new Uint8ClampedArray(W * H);
     let area = 0;
     for (let i = 0; i < alpha.length; i++) {
-      alpha[i] = fg ? Math.min(fg[i], keep[i]) : keep[i];
+      alpha[i] = fillsPhoto ? 255 : fg && !fgMissed ? Math.min(fg[i], keep[i]) : keep[i];
       if (alpha[i] > 40) area++;
     }
     // On its own (flat or on a hanger), the piece should be most of the foreground.
