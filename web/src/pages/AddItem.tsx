@@ -7,14 +7,13 @@ import { describeClothing } from '../lib/ai';
 import { useUserId } from '../lib/auth';
 import { compressImage, uploadImage } from '../lib/images';
 import {
-  cleanBackground,
   getSmartSetting,
   recogniseClothing,
+  scanPhoto,
   setSmartSetting,
   smartPhotosReady,
   SMART_DOWNLOAD_MB,
   type CleanPiece,
-  type ColorShare,
   type SmartGuess,
   type SmartSetting,
   warmUpSmartPhotos,
@@ -46,6 +45,7 @@ export default function AddItem() {
   const [smart, setSmart] = useState<SmartSetting>(getSmartSetting);
   const [step, setStep] = useState<'cleaning' | 'tagging' | null>(null);
   const [firstRun, setFirstRun] = useState(false);
+  const [alreadyWhite, setAlreadyWhite] = useState(false);
   const [aiFilled, setAiFilled] = useState(false);
   const [cleanFailed, setCleanFailed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -84,35 +84,42 @@ export default function AddItem() {
 
   async function process(photo: Blob, useSmart: boolean) {
     const id = ++run.current;
-    let first: CleanPiece | undefined;
-    setFirstRun(useSmart && !smartPhotosReady());
+    setAlreadyWhite(false);
     if (useSmart) {
+      setFirstRun(!smartPhotosReady());
       setStep('cleaning');
       try {
-        const found = await cleanBackground(photo);
+        const scan = await scanPhoto(photo);
         if (id !== run.current) return;
-        setPieces(found);
+        setPieces(scan.pieces);
         setPieceIdx(0);
         setWhich('clean');
-        first = found[0];
+        setAlreadyWhite(scan.alreadyWhite);
+        if (scan.guess) {
+          applyGuess(scan.guess);
+          setStep(null);
+          return;
+        }
+        await tag(id, scan.pieces[0]);
+        return;
       } catch {
         if (id !== run.current) return;
         setCleanFailed(true);
       }
     }
-    await tag(id, first?.clean ?? photo, first?.colors ?? [], useSmart);
+    await tag(id, null, photo);
   }
 
-  // Works out the type, colour and pattern and fills them in.
-  async function tag(id: number, forAi: Blob, colors: ColorShare[], useSmart: boolean) {
+  // Works out the type, colour and pattern of a piece (or a plain photo) and fills them in.
+  async function tag(id: number, piece: CleanPiece | null, photo?: Blob) {
     setStep('tagging');
     try {
       let guess: SmartGuess;
       try {
-        guess = useSmart ? await recogniseClothing(forAi, colors) : await describeClothing(forAi);
+        guess = piece ? await recogniseClothing(piece) : await describeClothing(photo!);
       } catch {
         // The photo AI couldn't run (e.g. no connection the first time): at least guess the colour.
-        guess = await describeClothing(forAi);
+        guess = await describeClothing(piece?.clean ?? photo!);
       }
       if (id === run.current) applyGuess(guess);
     } catch {
@@ -128,7 +135,7 @@ export default function AddItem() {
     if (!piece || i === pieceIdx) return;
     setPieceIdx(i);
     setWhich('clean');
-    tag(++run.current, piece.clean, piece.colors, true);
+    tag(++run.current, piece);
   }
 
   async function choose(file: File) {
@@ -221,7 +228,12 @@ export default function AddItem() {
           </div>
         </div>
       ) : null}
-      {clean && original ? (
+      {alreadyWhite && !step ? (
+        <p className="muted small center" style={{ margin: 0 }}>
+          This photo already has a white background, so we kept it as it is.
+        </p>
+      ) : null}
+      {clean && original && !alreadyWhite ? (
         <div className="photo-toggle" role="group" aria-label="Which photo to use">
           <button type="button" aria-pressed={which === 'clean'} onClick={() => setWhich('clean')}>
             White background
